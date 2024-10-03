@@ -4,13 +4,15 @@ use full_palette::{ORANGE, PURPLE};
 use plotters::prelude::*;
 use rusqlite::{params, Connection, Result};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::signal::ctrl_c;
 use tokio::time;
 
 #[derive(Debug)]
 pub struct AppUsage {
     pub name: String,
-    pub duration: u64, // Duration in seconds
+    pub duration: u64,
 }
 
 const IDLE_CHECK_SECS: i32 = 5;
@@ -94,30 +96,42 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
         .unwrap();
 }
 
-pub async fn track_processes(conn: &Connection) {
+pub async fn track_processes(conn: Arc<Connection>) {
     let mut interval = time::interval(Duration::from_secs(1));
+    let mut graph_interval = time::interval(Duration::from_secs(60)); // Generate graph every 60 seconds
     let mut i = 0;
     let mut idle = false;
 
     loop {
-        i += 1;
-        interval.tick().await;
+        tokio::select! {
+            _ = interval.tick() => {
+                i += 1;
 
-        if i == IDLE_CHECK_SECS {
-            // Check user input to see if we should pause tracking
-            let duration = windows_fg::get_last_input().as_secs();
-            idle = duration > IDLE_PERIOD;
-            i = 0;
-        }
+                if i == IDLE_CHECK_SECS {
+                    let duration = windows_fg::get_last_input().as_secs();
+                    idle = duration > IDLE_PERIOD;
+                    i = 0;
+                }
 
-        if !idle {
-            // Fetch window title and process ID from the current active window
-            let (window_pid, window_title) = windows_fg::get_active_window();
+                if !idle {
+                    let (window_pid, window_title) = windows_fg::get_active_window();
 
-            // Ensure valid window and process
-            if window_pid != 0 {
-                get_process(conn, &window_title); // Store usage data in the database
-            }
+                    if window_pid != 0 {
+                        get_process(&conn, &window_title);
+                    }
+                }
+            },
+            _ = graph_interval.tick() => {
+                // Generate graph at regular intervals
+                println!("Generating usage graph...");
+                draw_usage_graph_from_db(&conn);
+            },
+            _ = ctrl_c() => {
+                // Gracefully handle shutdown
+                println!("Received shutdown signal, generating final usage graph...");
+                draw_usage_graph_from_db(&conn);
+                break;
+            },
         }
     }
 }
@@ -129,10 +143,8 @@ pub fn get_process(conn: &Connection, window_title: &str) {
         return;
     }
 
-    // Use a dummy process name for illustration
-    let process_name = window_title.to_string(); // Replace with actual process name logic
+    let process_name = window_title.to_string();
 
-    // Check if the app already exists in the database and update its duration
     conn.execute(
         "INSERT INTO app_usage (app_name, duration) VALUES (?1, 1)
          ON CONFLICT(app_name) DO UPDATE SET duration = duration + 1",
@@ -143,18 +155,14 @@ pub fn get_process(conn: &Connection, window_title: &str) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let conn = Connection::open("app_usage.db")?;
+    let conn = Arc::new(Connection::open("app_usage.db")?);
 
-    // Create table if it doesn't exist
     create_usage_table(&conn)?;
 
     println!("App Usage Tracker started!");
 
-    // Track processes and store data in SQLite
-    track_processes(&conn).await;
-
-    // Draw the graph using the data from SQLite
-    draw_usage_graph_from_db(&conn);
+    // Track processes, handle periodic graph updates and shutdown signal
+    track_processes(conn.clone()).await;
 
     Ok(())
 }
