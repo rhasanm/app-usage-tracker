@@ -1,6 +1,6 @@
 mod windows_fg;
 
-use full_palette::{ORANGE, PURPLE};
+// use full_palette::{ORANGE, PURPLE};
 use plotters::prelude::*;
 use rusqlite::{params, Connection, Result};
 use std::collections::HashMap;
@@ -60,33 +60,56 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
 
     let max_duration = usage_data.values().max().unwrap_or(&0);
 
+    let y_max = if *max_duration == 0 { 1 } else { *max_duration };
+
+    let y_axis_max = 100;
+
     let mut chart = ChartBuilder::on(&root)
-        .caption(
-            "Application Usage Over Time",
-            ("sans-serif", 50).into_font(),
-        )
+        .caption("Application Usage Over Time", ("sans-serif", 50).into_font())
         .margin(10)
         .x_label_area_size(30)
         .y_label_area_size(40)
-        .build_cartesian_2d(0..usage_data.len() as i32, 0..*max_duration as i32)
+        .build_cartesian_2d(0..usage_data.len() as i32, 0..y_axis_max)
         .unwrap();
 
     chart.configure_mesh().draw().unwrap();
 
+    // let colors = vec![
+    //     &RED, &BLUE, &GREEN, &CYAN, &MAGENTA, &YELLOW, &BLACK
+    // ];
     let colors = vec![
-        &RED, &BLUE, &GREEN, &CYAN, &MAGENTA, &YELLOW, &BLACK, &ORANGE, &PURPLE,
+        &MAGENTA
     ];
+
+    let bar_width = 1;
+    let default_font_size = 12;
 
     for (i, (app_name, duration)) in usage_data.iter().enumerate() {
         let color = colors[i % colors.len()];
+        let normalized_duration = (*duration as f32 / y_max as f32 * y_axis_max as f32) as i32;
+
         chart
-            .draw_series(LineSeries::new(
-                vec![(i as i32, 0), (i as i32, *duration as i32)],
-                color,
-            ))
-            .unwrap()
-            .label(app_name)
-            .legend(move |(x, y)| Circle::new((x, y), 5, color));
+            .draw_series(std::iter::once(Rectangle::new(
+                [(i as i32, 0), (i as i32 + bar_width, normalized_duration)],
+                color.filled(),
+            )))
+            .unwrap();
+
+        let text_color = &BLACK;
+
+        let text_position = (i as i32 + bar_width / 2, normalized_duration / 2);
+
+        chart
+            .draw_series(std::iter::once(Text::new(
+                app_name.clone(),
+                text_position,
+                ("sans-serif", default_font_size)
+                    .into_font()
+                    .style(FontStyle::Normal)
+                    .color(text_color)
+                    .transform(FontTransform::Rotate90),
+            )))
+            .unwrap();
     }
 
     chart
@@ -98,7 +121,7 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
 
 pub async fn track_processes(conn: Arc<Connection>) {
     let mut interval = time::interval(Duration::from_secs(1));
-    let mut graph_interval = time::interval(Duration::from_secs(60)); // Generate graph every 60 seconds
+    let mut graph_interval = time::interval(Duration::from_secs(60));
     let mut i = 0;
     let mut idle = false;
 
@@ -122,12 +145,10 @@ pub async fn track_processes(conn: Arc<Connection>) {
                 }
             },
             _ = graph_interval.tick() => {
-                // Generate graph at regular intervals
                 println!("Generating usage graph...");
                 draw_usage_graph_from_db(&conn);
             },
             _ = ctrl_c() => {
-                // Gracefully handle shutdown
                 println!("Received shutdown signal, generating final usage graph...");
                 draw_usage_graph_from_db(&conn);
                 break;
@@ -161,7 +182,6 @@ async fn main() -> Result<()> {
 
     println!("App Usage Tracker started!");
 
-    // Track processes, handle periodic graph updates and shutdown signal
     track_processes(conn.clone()).await;
 
     Ok(())
