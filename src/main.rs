@@ -9,7 +9,9 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::signal::ctrl_c;
 use tokio::time;
-use windows_service::service::{ServiceAccess, ServiceErrorControl, ServiceStartType, ServiceType};
+use windows_service::service::{
+    ServiceAccess, ServiceErrorControl, ServiceStartType, ServiceState, ServiceType,
+};
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
 const SERVICE_NAME: &str = "AppUsageTracker";
@@ -210,21 +212,119 @@ fn install_service() -> Result<(), AppError> {
     Ok(())
 }
 
+fn uninstall_service() -> Result<(), AppError> {
+    let manager_access = ServiceManagerAccess::CONNECT;
+    let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
+
+    let service = service_manager.open_service(SERVICE_NAME, ServiceAccess::DELETE)?;
+
+    service.delete()?;
+    Ok(())
+}
+
+fn start_service() -> Result<(), AppError> {
+    let manager_access = ServiceManagerAccess::CONNECT;
+    let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
+
+    let service = service_manager.open_service(SERVICE_NAME, ServiceAccess::START)?;
+
+    service.start(&[] as &[OsString])?;
+    Ok(())
+}
+
+fn stop_service() -> Result<(), AppError> {
+    let manager_access = ServiceManagerAccess::CONNECT;
+    let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
+
+    let service = service_manager.open_service(SERVICE_NAME, ServiceAccess::STOP)?;
+
+    service.stop()?;
+    Ok(())
+}
+
+fn delete_service() -> Result<(), AppError> {
+    let manager_access = ServiceManagerAccess::CONNECT;
+    let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
+
+    let service =
+        service_manager.open_service(SERVICE_NAME, ServiceAccess::STOP | ServiceAccess::DELETE)?;
+
+    let status = service.query_status()?;
+    if status.current_state == ServiceState::Running {
+        service.stop()?;
+    }
+
+    service.delete()?;
+    Ok(())
+}
+
+fn get_service_status() -> Result<ServiceState, AppError> {
+    let manager_access = ServiceManagerAccess::CONNECT;
+    let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
+
+    let service = service_manager.open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS)?;
+
+    let status = service.query_status()?;
+    Ok(status.current_state)
+}
+
+async fn service_main() {
+    let conn = Arc::new(Connection::open("app_usage.db").expect("Could not open database"));
+    create_usage_table(&conn).expect("Could not create usage table");
+
+    track_processes(conn.clone()).await;
+}
+
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let args: Vec<String> = std::env::args().collect();
-    
-    if args.len() > 1 && args[1] == "--install" {
-        install_service()?;
-        println!("Service installed successfully.");
-        return Ok(());
+
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "--install" => {
+                install_service()?;
+                println!("Service installed successfully.");
+                return Ok(());
+            },
+            "--uninstall" => {
+                uninstall_service()?;
+                println!("Service uninstalled successfully.");
+                return Ok(());
+            },
+            "--start" => {
+                start_service()?;
+                println!("Service started successfully.");
+                return Ok(());
+            },
+            "--stop" => {
+                stop_service()?;
+                println!("Service stopped successfully.");
+                return Ok(());
+            },
+            "--delete" => {
+                delete_service()?;
+                println!("Service deleted successfully.");
+                return Ok(());
+            },
+            "--status" => {
+                match get_service_status() {
+                    Ok(state) => {
+                        println!("Service status: {:?}", state);
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to retrieve service status: {:?}", e);
+                    }
+                }
+                return Ok(());
+            },
+            _ => eprintln!("Unknown command. Use --install, --uninstall, --start, --stop, --delete, or --status."),
+        }
     }
 
     let conn = Arc::new(Connection::open("app_usage.db")?);
     create_usage_table(&conn)?;
 
-    println!("App Usage Tracker started!");
-    track_processes(conn.clone()).await;
+    service_main().await;
 
     Ok(())
 }
