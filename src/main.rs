@@ -83,16 +83,11 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
     root.fill(&WHITE).unwrap();
 
     let max_duration = usage_data.values().max().unwrap_or(&0);
-
     let y_max = if *max_duration == 0 { 1 } else { *max_duration };
-
     let y_axis_max = 100;
 
     let mut chart = ChartBuilder::on(&root)
-        .caption(
-            "Application Usage Over Time",
-            ("sans-serif", 50).into_font(),
-        )
+        .caption("Application Usage Over Time", ("sans-serif", 50).into_font())
         .margin(10)
         .x_label_area_size(30)
         .y_label_area_size(40)
@@ -102,7 +97,6 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
     chart.configure_mesh().draw().unwrap();
 
     let colors = vec![&MAGENTA];
-
     let bar_width = 1;
     let default_font_size = 12;
 
@@ -128,7 +122,7 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
                     .into_font()
                     .style(FontStyle::Normal)
                     .color(text_color)
-                    .transform(FontTransform::Rotate90),
+                    // .transform(FontTransform::Rotate90),
             )))
             .unwrap();
     }
