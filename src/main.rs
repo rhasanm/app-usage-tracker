@@ -1,13 +1,31 @@
 mod windows_fg;
 
-// use full_palette::{ORANGE, PURPLE};
 use plotters::prelude::*;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, Result as RusqliteResult};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Duration;
+use thiserror::Error;
 use tokio::signal::ctrl_c;
 use tokio::time;
+use windows_service::service::{ServiceAccess, ServiceErrorControl, ServiceStartType, ServiceType};
+use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+const SERVICE_NAME: &str = "AppUsageTracker";
+const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
+
+#[derive(Error, Debug)]
+enum AppError {
+    #[error("Windows service error: {0}")]
+    WindowsService(#[from] windows_service::Error),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Database error: {0}")]
+    Database(#[from] rusqlite::Error),
+}
 
 #[derive(Debug)]
 pub struct AppUsage {
@@ -18,7 +36,7 @@ pub struct AppUsage {
 const IDLE_CHECK_SECS: i32 = 5;
 const IDLE_PERIOD: u64 = 30;
 
-pub fn create_usage_table(conn: &Connection) -> Result<()> {
+pub fn create_usage_table(conn: &Connection) -> RusqliteResult<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS app_usage (
             app_name TEXT PRIMARY KEY,
@@ -65,7 +83,10 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
     let y_axis_max = 100;
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Application Usage Over Time", ("sans-serif", 50).into_font())
+        .caption(
+            "Application Usage Over Time",
+            ("sans-serif", 50).into_font(),
+        )
         .margin(10)
         .x_label_area_size(30)
         .y_label_area_size(40)
@@ -74,12 +95,7 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
 
     chart.configure_mesh().draw().unwrap();
 
-    // let colors = vec![
-    //     &RED, &BLUE, &GREEN, &CYAN, &MAGENTA, &YELLOW, &BLACK
-    // ];
-    let colors = vec![
-        &MAGENTA
-    ];
+    let colors = vec![&MAGENTA];
 
     let bar_width = 1;
     let default_font_size = 12;
@@ -96,7 +112,6 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
             .unwrap();
 
         let text_color = &BLACK;
-
         let text_position = (i as i32 + bar_width / 2, normalized_duration / 2);
 
         chart
@@ -174,14 +189,41 @@ pub fn get_process(conn: &Connection, window_title: &str) {
     .unwrap();
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let conn = Arc::new(Connection::open("app_usage.db")?);
+fn install_service() -> Result<(), AppError> {
+    let manager_access = ServiceManagerAccess::CREATE_SERVICE;
+    let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
 
+    let service_info = windows_service::service::ServiceInfo {
+        name: OsString::from(SERVICE_NAME),
+        display_name: OsString::from("App Usage Tracker Service"),
+        service_type: SERVICE_TYPE,
+        start_type: ServiceStartType::AutoStart,
+        error_control: ServiceErrorControl::Normal,
+        executable_path: std::env::current_exe()?,
+        launch_arguments: vec![],
+        dependencies: vec![],
+        account_name: None,
+        account_password: None,
+    };
+
+    service_manager.create_service(&service_info, ServiceAccess::START | ServiceAccess::STOP)?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), AppError> {
+    let args: Vec<String> = std::env::args().collect();
+    
+    if args.len() > 1 && args[1] == "--install" {
+        install_service()?;
+        println!("Service installed successfully.");
+        return Ok(());
+    }
+
+    let conn = Arc::new(Connection::open("app_usage.db")?);
     create_usage_table(&conn)?;
 
     println!("App Usage Tracker started!");
-
     track_processes(conn.clone()).await;
 
     Ok(())
