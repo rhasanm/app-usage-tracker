@@ -1,4 +1,4 @@
-mod windows_fg;
+mod active_window_tracker;
 
 use plotters::prelude::*;
 use rusqlite::{params, Connection, Result as RusqliteResult};
@@ -41,8 +41,12 @@ const IDLE_PERIOD: u64 = 30;
 pub fn create_usage_table(conn: &Connection) -> RusqliteResult<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS app_usage (
-            app_name TEXT PRIMARY KEY,
-            duration INTEGER NOT NULL
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task TEXT NOT NULL,
+            app_name TEXT NOT NULL,
+            duration INTEGER NOT NULL,
+            usage_date DATE NOT NULL,
+            UNIQUE (task, app_name, usage_date)
         )",
         [],
     )?;
@@ -148,13 +152,13 @@ pub async fn track_processes(conn: Arc<Connection>) {
                 i += 1;
 
                 if i == IDLE_CHECK_SECS {
-                    let duration = windows_fg::get_last_input().as_secs();
+                    let duration = active_window_tracker::get_last_input().as_secs();
                     idle = duration > IDLE_PERIOD;
                     i = 0;
                 }
 
                 if !idle {
-                    let (window_pid, window_title) = windows_fg::get_active_window();
+                    let (window_pid, window_title) = active_window_tracker::get_active_window();
 
                     if window_pid != 0 {
                         get_process(&conn, &window_title);
@@ -175,18 +179,27 @@ pub async fn track_processes(conn: Arc<Connection>) {
 }
 
 pub fn get_process(conn: &Connection, window_title: &str) {
-    let (window_pid, _) = windows_fg::get_active_window();
+    let (window_pid, _) = active_window_tracker::get_active_window();
 
     if window_pid == 0 {
         return;
     }
 
-    let process_name = window_title.to_string();
+    let parts: Vec<&str> = window_title.split(|c| c == '-' || c == '|').collect();
+
+    let app_name = parts.last().unwrap_or(&"").trim().to_string();
+    let task = parts[..parts.len() - 1].join(" - ").trim().to_string();
+
+    let duration = 1;
+    let usage_date = chrono::Utc::now().date_naive();
+
+    let usage_date_str = usage_date.format("%Y-%m-%d").to_string();
 
     conn.execute(
-        "INSERT INTO app_usage (app_name, duration) VALUES (?1, 1)
-         ON CONFLICT(app_name) DO UPDATE SET duration = duration + 1",
-        params![process_name],
+        "INSERT INTO app_usage (task, app_name, duration, usage_date)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(task, app_name, usage_date) DO UPDATE SET duration = duration + ?3",
+        params![task, app_name, duration, usage_date_str],
     )
     .unwrap();
 }

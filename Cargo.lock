@@ -48,6 +48,7 @@ dependencies = [
 name = "app-usage-tracker"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "plotters",
  "rusqlite",
  "sysinfo",
