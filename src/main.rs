@@ -79,7 +79,7 @@ pub fn get_usage_data_from_db(conn: &Connection) -> HashMap<String, u64> {
 pub fn draw_usage_graph_from_db(conn: &Connection) {
     let usage_data = get_usage_data_from_db(conn);
 
-    let root = BitMapBackend::new("usage_graph.png", (800, 600)).into_drawing_area();
+    let root = BitMapBackend::new("usage_graph.png", (1600, 900)).into_drawing_area();
     root.fill(&WHITE).unwrap();
 
     let max_duration = usage_data.values().max().unwrap_or(&0);
@@ -87,7 +87,10 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
     let y_axis_max = 100;
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Application Usage Over Time", ("sans-serif", 50).into_font())
+        .caption(
+            "Application Usage Over Time",
+            ("sans-serif", 50).into_font(),
+        )
         .margin(10)
         .x_label_area_size(30)
         .y_label_area_size(40)
@@ -96,7 +99,7 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
 
     chart.configure_mesh().draw().unwrap();
 
-    let colors = vec![&MAGENTA];
+    let colors = vec![&MAGENTA, &BLUE, &CYAN, &GREEN, &RED, &YELLOW];
     let bar_width = 1;
     let default_font_size = 12;
 
@@ -121,8 +124,7 @@ pub fn draw_usage_graph_from_db(conn: &Connection) {
                 ("sans-serif", default_font_size)
                     .into_font()
                     .style(FontStyle::Normal)
-                    .color(text_color)
-                    // .transform(FontTransform::Rotate90),
+                    .color(text_color), // .transform(FontTransform::Rotate90),
             )))
             .unwrap();
     }
