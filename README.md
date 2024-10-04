@@ -1,4 +1,3 @@
-```markdown
 # App Usage Tracker
 
 ## Overview
@@ -90,4 +89,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - This project utilizes the [Rusqlite](https://github.com/rusqlite/rusqlite) library for SQLite interaction.
 - Thanks to the contributors and the Rust community for their support and resources.
-
