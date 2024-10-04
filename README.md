@@ -1,5 +1,3 @@
-Here's a sample `README.md` for your app usage tracker project. You can modify it further based on your preferences and additional details specific to your project.
-
 ```markdown
 # App Usage Tracker
 
