@@ -24,7 +24,7 @@ The App Usage Tracker is a lightweight application designed to monitor and recor
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/app-usage-tracker.git
+   git clone https://github.com/rhasanm/app-usage-tracker.git
    cd app-usage-tracker
    ```
 
